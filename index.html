@@ -27,20 +27,144 @@ const seed=[
 ['Hedvi Markkinointi Oy','Turku · pakkanen 600 m² + viileä 400 m²','Tilatarve','LEADS','Etsi kehätien varresta'],
 ['Piikkio Works','Turku · toimistotarve 1 000 m²','Tilatarve','LEADS','Jatka vaihtoehtojen hakua']
 ].map((x,i)=>({id:i+1,name:x[0],detail:x[1],status:x[2],type:x[3],next:x[4],contact:x[5]||'',address:x[6]||''}));
+
 let cases=JSON.parse(localStorage.getItem('tc_cases')||'null')||seed, page='Etusivu', tab='Kaikki', selected=null, query='';
-const save=()=>localStorage.setItem('tc_cases',JSON.stringify(cases)); const esc=s=>String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const save=()=>localStorage.setItem('tc_cases',JSON.stringify(cases));
+const esc=s=>String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
 function header(){return `<header class="head"><div class="row"><div><div class="brand">TILACENTER</div><h1>${page}</h1></div><div class="avatar">MM</div></div>${page!='Tehtävät'?`<div class="tabs">${['Kaikki','Leads','Välitys'].map(x=>`<button class="${tab==x?'on':''}" onclick="tab='${x}';render()">${x}</button>`).join('')}</div>`:''}</header>`}
 function filtered(){return cases.filter(c=>(tab=='Kaikki'||c.type==tab.toUpperCase())&&(!query||[c.name,c.detail,c.status,c.next,c.contact,c.address].join(' ').toLowerCase().includes(query.toLowerCase())))}
 function list(arr){return `<div class="list">${arr.map(c=>`<div class="card case" onclick="selected=${c.id};render()"><div class="ico">${esc(c.name[0])}</div><div><b>${esc(c.name)}</b> <span class="badge">${c.type}</span><div class="small">${esc(c.detail)}</div></div><div class="status">${esc(c.status)}</div></div>`).join('')}</div>`}
 function detail(c){return `<header class="head detailhead"><button class="back" onclick="selected=null;render()">‹ Takaisin</button><h1>${esc(c.name)}</h1></header><div class="pad"><div class="card"><span class="badge">${c.type}</span><h2>${esc(c.detail)}</h2><p class="small">${esc(c.status)}</p></div>${c.contact?`<div class="card"><div class="title2">Yhteyshenkilö</div><p>${esc(c.contact)}</p></div>`:''}${c.address?`<div class="card"><div class="title2">Osoite / toimipiste</div><p>${esc(c.address)}</p></div>`:''}<div class="card"><div class="title2">Seuraava toimenpide</div><p class="next">${esc(c.next)}</p></div><div class="card"><div class="title2">Tapahtumat</div><p>Viimeisin päivitys · puhelut, tarjoukset ja kommentit kootaan tähän.</p></div><button class="btn fab" onclick="voice()">● Puhu päivitys</button></div>`}
+
 let voiceDraft={text:'',intent:'',caseId:null};
+let activeRecognition=null;
+let speechTimer=null;
+let speechStopping=false;
+
 function classifyVoice(t){const s=t.toLowerCase(),dev=['väri','ulkoasu','rakenne','kortti','nappi','painike','välilehti','fontti','layout','käyttöliittym','piilota','siirrä','isompi','pienempi','tausta','kehitys','muuta sovell','muuta app','lisää appiin'],crm=['tarjott','kiinnost','vuokra','myynt','soitti','palataan','follow','muistuta','tarvitsee','tilatarve','kohde','sopimus','ethos','asiakas','liidi','neuvottel'];let d=dev.filter(k=>s.includes(k)).length,c=crm.filter(k=>s.includes(k)).length;return d>c?'DEV':c>d?'CRM':'UNCLEAR'}
 function findCaseFromText(t){const s=t.toLowerCase();return cases.find(c=>s.includes(c.name.toLowerCase().replace(' oy','')))||(selected?cases.find(c=>c.id==selected):null)}
-function voice(){document.body.insertAdjacentHTML('beforeend',`<div id="modal" class="modal"><div class="sheet"><div class="row"><div><div class="title2">PUHEOHJAUS</div><h2 style="margin:6px 0">Puhu CRM:lle</h2></div><button class="btn" onclick="modal.remove()">✕</button></div><p class="small">Sano normaalisti CRM-päivitys tai sovelluksen kehitysidea. Tunnistan tarkoituksen automaattisesti.</p><div id="listenState" class="card" style="text-align:center;margin-top:14px"><div class="mic" style="margin:auto">●</div><b id="listenTitle">Paina ja puhu</b><div class="small" id="listenHelp">Puhe tarkistetaan ennen tallennusta.</div></div><textarea id="note" class="search" style="min-height:90px;margin-top:12px" placeholder="Puhe ilmestyy tähän. Voit myös kirjoittaa."></textarea><button class="btn fab" style="width:100%;margin-top:12px" onclick="startSpeech()">● Aloita puhe</button><button class="btn" style="width:100%;margin-top:8px" onclick="reviewVoice()">Tarkista tulkinta</button></div></div>`)}
-function startSpeech(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){listenTitle.textContent='Puheentunnistus ei ole käytettävissä';listenHelp.textContent='Kirjoita päivitys kenttään.';return}const r=new SR();r.lang='fi-FI';r.interimResults=true;r.continuous=false;listenTitle.textContent='Kuuntelen…';listenHelp.textContent='Puhu normaalisti.';r.onresult=e=>{let x='';for(let i=e.resultIndex;i<e.results.length;i++)x+=e.results[i][0].transcript;note.value=x};r.onerror=()=>{listenTitle.textContent='Puhe ei onnistunut';listenHelp.textContent='Yritä uudelleen tai kirjoita.'};r.onend=()=>{listenTitle.textContent='Puhe vastaanotettu';listenHelp.textContent='Paina Tarkista tulkinta.'};r.start()}
-function reviewVoice(){const t=note.value.trim();if(!t)return;const intent=classifyVoice(t),c=findCaseFromText(t);voiceDraft={text:t,intent,caseId:c?c.id:null};if(intent==='UNCLEAR'){modal.querySelector('.sheet').innerHTML=`<div class="title2">TULKINTA EPÄVARMA</div><h2>Mitä tarkoitit?</h2><div class="card"><p>${esc(t)}</p></div><div class="two"><button class="btn" onclick="voiceDraft.intent='CRM';showReview()">CRM-päivitys</button><button class="btn fab" onclick="voiceDraft.intent='DEV';showReview()">Kehitysidea</button></div>`;return}showReview()}
-function showReview(){const c=cases.find(x=>x.id==voiceDraft.caseId),isDev=voiceDraft.intent==='DEV';modal.querySelector('.sheet').innerHTML=`<div class="title2">${isDev?'KEHITYSIDEA':'CRM-PÄIVITYS'}</div><h2>Tarkista ennen tallennusta</h2><div class="card"><div class="title2">${isDev?'Sovelluksen muutosidea':'Tunnistettu päivitys'}</div><p>${esc(voiceDraft.text)}</p>${!isDev?`<div class="small">Case: ${c?esc(c.name):'ei tunnistettu'}</div>`:''}</div><div class="two"><button class="btn" onclick="modal.remove()">Peruuta</button><button class="btn fab" onclick="saveVoiceDraft()">${isDev?'Tallenna idea':'Tallenna CRM:ään'}</button></div>`}
-function saveVoiceDraft(){if(voiceDraft.intent==='DEV'){const a=JSON.parse(localStorage.getItem('tc_devideas')||'[]');a.unshift({text:voiceDraft.text,date:new Date().toISOString(),status:'Uusi'});localStorage.setItem('tc_devideas',JSON.stringify(a))}else{let c=cases.find(x=>x.id==voiceDraft.caseId);if(c){c.status=voiceDraft.text;c.next='Tarkista jatkotoimi';save()}else{const a=JSON.parse(localStorage.getItem('tc_events')||'[]');a.unshift({text:voiceDraft.text,date:new Date().toISOString()});localStorage.setItem('tc_events',JSON.stringify(a))}}modal.querySelector('.sheet').innerHTML=`<div style="text-align:center;padding:25px 0"><div style="font-size:42px">✓</div><h2>${voiceDraft.intent==='DEV'?'Kehitysidea tallennettu':'CRM päivitetty'}</h2><p class="small">${voiceDraft.intent==='DEV'?'Idea erotettiin CRM-datasta.':'Päivitys tallennettiin.'}</p><button class="btn fab" onclick="modal.remove();render()">Valmis</button></div>`}
+
+function cleanupSpeech(abort=false){
+  if(speechTimer){clearTimeout(speechTimer);speechTimer=null}
+  const r=activeRecognition;
+  activeRecognition=null;
+  speechStopping=false;
+  if(r){
+    try{abort?r.abort():r.stop()}catch(e){}
+  }
+}
+
+function closeVoice(){
+  cleanupSpeech(true);
+  const m=document.getElementById('modal');
+  if(m)m.remove();
+}
+
+function voice(){
+  cleanupSpeech(true);
+  document.body.insertAdjacentHTML('beforeend',`<div id="modal" class="modal"><div class="sheet"><div class="row"><div><div class="title2">PUHEOHJAUS</div><h2 style="margin:6px 0">Puhu CRM:lle</h2></div><button class="btn" onclick="closeVoice()">✕</button></div><p class="small">Sano normaalisti CRM-päivitys tai sovelluksen kehitysidea. Tunnistan tarkoituksen automaattisesti.</p><div id="listenState" class="card" style="text-align:center;margin-top:14px"><div class="mic" style="margin:auto">●</div><b id="listenTitle">Paina ja puhu</b><div class="small" id="listenHelp">Puhe tarkistetaan ennen tallennusta.</div></div><textarea id="note" class="search" style="min-height:90px;margin-top:12px" placeholder="Puhe ilmestyy tähän. Voit myös kirjoittaa."></textarea><button id="speechButton" class="btn fab" style="width:100%;margin-top:12px" onclick="startSpeech()">● Aloita puhe</button><button class="btn" style="width:100%;margin-top:8px" onclick="reviewVoice()">Tarkista tulkinta</button></div></div>`)
+}
+
+function startSpeech(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const title=document.getElementById('listenTitle');
+  const help=document.getElementById('listenHelp');
+  const noteEl=document.getElementById('note');
+  const button=document.getElementById('speechButton');
+
+  if(!SR){
+    if(title)title.textContent='Puheentunnistus ei ole käytettävissä';
+    if(help)help.textContent='Kirjoita päivitys kenttään.';
+    return;
+  }
+
+  if(activeRecognition){
+    if(title)title.textContent='Kuuntelu on jo käynnissä';
+    if(help)help.textContent='Odota hetki tai sulje puheohjaus.';
+    return;
+  }
+
+  const r=new SR();
+  activeRecognition=r;
+  speechStopping=false;
+  r.lang='fi-FI';
+  r.interimResults=true;
+  r.continuous=false;
+
+  if(title)title.textContent='Kuuntelen…';
+  if(help)help.textContent='Puhu normaalisti. Kuuntelu päättyy viimeistään 40 sekunnissa.';
+  if(button){button.disabled=true;button.textContent='● Kuuntelen…'}
+
+  r.onresult=e=>{
+    let x='';
+    for(let i=0;i<e.results.length;i++)x+=e.results[i][0].transcript;
+    if(noteEl)noteEl.value=x;
+  };
+
+  r.onerror=e=>{
+    if(r!==activeRecognition)return;
+    if(speechTimer){clearTimeout(speechTimer);speechTimer=null}
+    activeRecognition=null;
+    speechStopping=false;
+    if(title)title.textContent='Puhe ei onnistunut';
+    if(help)help.textContent=e.error==='not-allowed'?'Mikrofonin käyttö ei ole sallittu.':'Yritä uudelleen tai kirjoita.';
+    if(button){button.disabled=false;button.textContent='● Aloita puhe'}
+  };
+
+  r.onend=()=>{
+    if(r!==activeRecognition)return;
+    if(speechTimer){clearTimeout(speechTimer);speechTimer=null}
+    activeRecognition=null;
+    const wasStopping=speechStopping;
+    speechStopping=false;
+    if(title)title.textContent=noteEl&&noteEl.value.trim()?'Puhe vastaanotettu':'Kuuntelu päättyi';
+    if(help)help.textContent=noteEl&&noteEl.value.trim()?'Paina Tarkista tulkinta.':(wasStopping?'40 sekunnin kuunteluaika päättyi. Voit yrittää uudelleen.':'Puhu uudelleen tai kirjoita päivitys.');
+    if(button){button.disabled=false;button.textContent='● Aloita puhe'}
+  };
+
+  speechTimer=setTimeout(()=>{
+    if(activeRecognition===r){
+      speechStopping=true;
+      if(title)title.textContent='Kuuntelu päättyy…';
+      if(help)help.textContent='40 sekunnin enimmäisaika täyttyi.';
+      try{r.stop()}catch(e){
+        cleanupSpeech(true);
+        if(button){button.disabled=false;button.textContent='● Aloita puhe'}
+      }
+    }
+  },40000);
+
+  try{
+    r.start();
+  }catch(e){
+    cleanupSpeech(true);
+    if(title)title.textContent='Puhe ei käynnistynyt';
+    if(help)help.textContent='Yritä uudelleen.';
+    if(button){button.disabled=false;button.textContent='● Aloita puhe'}
+  }
+}
+
+function reviewVoice(){
+  const noteEl=document.getElementById('note');
+  const t=noteEl?noteEl.value.trim():'';
+  if(!t)return;
+  cleanupSpeech(true);
+  const intent=classifyVoice(t),c=findCaseFromText(t);
+  voiceDraft={text:t,intent,caseId:c?c.id:null};
+  if(intent==='UNCLEAR'){
+    modal.querySelector('.sheet').innerHTML=`<div class="title2">TULKINTA EPÄVARMA</div><h2>Mitä tarkoitit?</h2><div class="card"><p>${esc(t)}</p></div><div class="two"><button class="btn" onclick="voiceDraft.intent='CRM';showReview()">CRM-päivitys</button><button class="btn fab" onclick="voiceDraft.intent='DEV';showReview()">Kehitysidea</button></div>`;
+    return
+  }
+  showReview()
+}
+
+function showReview(){const c=cases.find(x=>x.id==voiceDraft.caseId),isDev=voiceDraft.intent==='DEV';modal.querySelector('.sheet').innerHTML=`<div class="title2">${isDev?'KEHITYSIDEA':'CRM-PÄIVITYS'}</div><h2>Tarkista ennen tallennusta</h2><div class="card"><div class="title2">${isDev?'Sovelluksen muutosidea':'Tunnistettu päivitys'}</div><p>${esc(voiceDraft.text)}</p>${!isDev?`<div class="small">Case: ${c?esc(c.name):'ei tunnistettu'}</div>`:''}</div><div class="two"><button class="btn" onclick="closeVoice()">Peruuta</button><button class="btn fab" onclick="saveVoiceDraft()">${isDev?'Tallenna idea':'Tallenna CRM:ään'}</button></div>`}
+
+function saveVoiceDraft(){cleanupSpeech(true);if(voiceDraft.intent==='DEV'){const a=JSON.parse(localStorage.getItem('tc_devideas')||'[]');a.unshift({text:voiceDraft.text,date:new Date().toISOString(),status:'Uusi'});localStorage.setItem('tc_devideas',JSON.stringify(a))}else{let c=cases.find(x=>x.id==voiceDraft.caseId);if(c){c.status=voiceDraft.text;c.next='Tarkista jatkotoimi';save()}else{const a=JSON.parse(localStorage.getItem('tc_events')||'[]');a.unshift({text:voiceDraft.text,date:new Date().toISOString()});localStorage.setItem('tc_events',JSON.stringify(a))}}modal.querySelector('.sheet').innerHTML=`<div style="text-align:center;padding:25px 0"><div style="font-size:42px">✓</div><h2>${voiceDraft.intent==='DEV'?'Kehitysidea tallennettu':'CRM päivitetty'}</h2><p class="small">${voiceDraft.intent==='DEV'?'Idea erotettiin CRM-datasta.':'Päivitys tallennettiin.'}</p><button class="btn fab" onclick="closeVoice();render()">Valmis</button></div>`}
+
 function render(){let a=document.getElementById('app');if(selected){a.innerHTML=detail(cases.find(x=>x.id==selected));return}let body='';if(page=='Etusivu')body=`<div class="pad"><button class="voice" onclick="voice()"><div class="mic">●</div><div><b style="font-size:18px">Puhu CRM:lle</b><div class="small">CRM-päivitys tai kehitysidea</div></div></button><h2>Avoimet caset</h2>${list(filtered())}</div>`;if(page=='Caset')body=`<div class="pad"><button class="btn fab" onclick="newCase()">+ Uusi case</button><h2>Avoimet caset</h2>${list(filtered())}</div>`;if(page=='Haku')body=`<div class="pad"><input class="search" value="${esc(query)}" oninput="query=this.value;render()" placeholder="Hae yritys, henkilö tai kohde…" autofocus><div style="margin-top:16px">${list(filtered())}</div></div>`;if(page=='Tehtävät')body=`<div class="pad">${cases.map(c=>`<div class="card" onclick="selected=${c.id};render()"><div class="small">${esc(c.name)}</div><b>${esc(c.next)}</b></div>`).join('')}</div>`;a.innerHTML=header()+body+`<nav class="nav">${['Etusivu','Caset','Haku','Tehtävät'].map((x,i)=>`<button class="${page==x?'on':''}" onclick="page='${x}';selected=null;render()"><div>${['⌂','▤','⌕','✓'][i]}</div>${x}</button>`).join('')}</nav>`}
-function newCase(){let n=prompt('Yritys / case');if(!n)return;let c={id:Date.now(),name:n,detail:'Täydennä sijainti ja tilatarve',status:'Uusi',type:tab=='Välitys'?'VÄLITYS':'LEADS',next:'Ota yhteyttä',contact:'',address:''};cases.unshift(c);save();selected=c.id;render()}render();
+
+function newCase(){let n=prompt('Yritys / case');if(!n)return;let c={id:Date.now(),name:n,detail:'Täydennä sijainti ja tilatarve',status:'Uusi',type:tab=='Välitys'?'VÄLITYS':'LEADS',next:'Ota yhteyttä',contact:'',address:''};cases.unshift(c);save();selected=c.id;render()}
+render();
 </script></body></html>
